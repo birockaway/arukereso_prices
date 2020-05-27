@@ -74,6 +74,7 @@ def get_file_dicts(filepath):
                                       filename=name)
             yield line_dicts
 
+
 if __name__ == '__main__':
     logger = logging.getLogger()
     handler = logging.StreamHandler()
@@ -188,4 +189,4 @@ if __name__ == '__main__':
     with open(f'{datadir}out/tables/arukereso_last_timestamp.csv', 'w+') as fo:
         dict_writer = csv.DictWriter(fo, fieldnames=['max_timestamp_this_run'])
         dict_writer.writeheader()
-        dict_writer.writerow([last_timestamp])
+        dict_writer.writerow({'max_timestamp_this_run': last_timestamp})
