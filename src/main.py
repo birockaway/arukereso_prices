@@ -49,7 +49,6 @@ class ArukeresoProcessor:
         self.password = parameters.get('#password')
         self.passphrase = parameters.get('#passphrase')
         self.rsa_key = parameters.get('#key')
-        self.wanted_columns = parameters.get('wanted_columns')
         self.sftp_folder = '/upload/'
         self.files_to_process = []
         self.last_timestamp = 0
