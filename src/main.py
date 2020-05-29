@@ -1,10 +1,12 @@
 import csv
 import re
 import os
-import sys
 from contextlib import contextmanager
 from io import StringIO
 import logging
+import queue
+import threading
+import concurrent.futures
 
 import paramiko
 from logstash_formatter import LogstashFormatterV1
@@ -34,13 +36,12 @@ def sftp_connection(server_address, port_number, username, password_con, rsa, pa
 
 
 class ArukeresoProcessor:
-    def __init__(self, columns_list, results_writer):
-        self.logger = logging.getLogger(__name__)
+    def __init__(self, columns_list):
         self.datadir = os.getenv('KBC_DATADIR', '/data/')
         cfg = docker.Config(self.datadir)
         parameters = cfg.get_parameters()
         # log parameters (excluding sensitive designated by '#')
-        self.logger.info({k: v for k, v in parameters.items() if "#" not in k})
+        logging.info({k: v for k, v in parameters.items() if "#" not in k})
         self.previous_timestamp_filename = parameters.get('previous_timestamp_filename')
         self.filename_pattern = parameters.get('filename_pattern')
         self.server = parameters.get('server')
@@ -54,7 +55,6 @@ class ArukeresoProcessor:
         self.last_timestamp = 0
         self.previous_timestamp = 0
         self.columns_list = columns_list
-        self.results_writer = results_writer
         (self.common_fields, self.highlighted_fields,
          self.cheapest_fields, self.mall_fields,
          self.constant_fields, self.observed_fields) = None, None, None, None, None, None
@@ -120,7 +120,7 @@ class ArukeresoProcessor:
                     if modified_time > last_timestamp:
                         last_timestamp = modified_time
                     sourcepath = f'{self.sftp_folder}{file.filename}'
-                    self.logger.info(f'Downloading file {sourcepath}')
+                    logging.info(f'Downloading file {sourcepath}')
                     destpath = f'{destroot}/{file.filename}'
                     self.files_to_process.append(destpath)
                     sftp.get(sourcepath, destpath)
@@ -130,7 +130,7 @@ class ArukeresoProcessor:
         processed_eshops = []
         results = []
         # the order is important
-        # if highlighted, we want to preserve the info adn ignore other records for the same shop
+        # if highlighted, we want to preserve the info and ignore other records for the same shop
         for mapping in self.highlighted_fields + self.observed_fields + self.cheapest_fields + self.mall_fields:
             full_mapping = {**self.common_fields, **mapping}
             shop_data = {
@@ -169,30 +169,50 @@ class ArukeresoProcessor:
                 yield line_dicts
 
     def write_new_last_timestamp(self):
-        self.logger.info('Processing done. Writing last timestamp.')
+        logging.info('Processing done. Writing last timestamp.')
         with open(f'{self.datadir}out/tables/arukereso_last_timestamp.csv', 'w+') as fo:
             dict_writer = csv.DictWriter(fo, fieldnames=['max_timestamp_this_run'])
             dict_writer.writeheader()
             dict_writer.writerow({'max_timestamp_this_run': self.last_timestamp})
 
-    def produce_results(self):
+    def produce_results(self, task_queue):
         self.define_field_mappings()
         self.get_previous_last_timestamp()
         self.download_new_files()
         if not self.files_to_process:
-            self.logger.info('No new files to process. Exiting.')
-            sys.exit(0)
+            logging.info('No new files to process. Exiting.')
+            task_queue.put('DONE')
         else:
-            self.logger.info(f'Downloaded {len(self.files_to_process)} files.')
-            self.results_writer.writeheader()
+            logging.info(f'Downloaded {len(self.files_to_process)} files.')
             for file in self.files_to_process:
-                self.logger.info(f'Processing file: {file}')
+                logging.info(f'Processing file: {file}')
                 try:
                     for result_dicts in self.get_file_dicts(file):
-                        self.results_writer.writerows(result_dicts)
+                        task_queue.put(result_dicts)
                 except Exception as e:
-                    self.logger.error(f'Failed to process file: {file}. Exception {e}.')
+                    logging.error(f'Failed to process file: {file}. Exception {e}.')
             self.write_new_last_timestamp()
+            task_queue.put('DONE')
+
+
+def producer(task_queue, columns_list):
+    arukereso_prices = ArukeresoProcessor(columns_list=columns_list)
+    arukereso_prices.produce_results(task_queue=task_queue)
+
+
+def writer(task_queue, columns_list, threading_event, filepath):
+    while not threading_event.is_set():
+        with open(filepath, 'w+') as outfile:
+            results_writer = csv.DictWriter(outfile, fieldnames=columns_list, extrasaction='ignore')
+            results_writer.writeheader()
+            while True:
+                chunk = task_queue.get()
+                if chunk == 'DONE':
+                    logging.info('DONE received. Exiting.')
+                    threading_event.set()
+                    break
+                else:
+                    results_writer.writerows(chunk)
 
 
 if __name__ == '__main__':
@@ -222,7 +242,11 @@ if __name__ == '__main__':
                 'TOP',
                 'TS',
                 'URL', ]
-    with open(f'{os.getenv("KBC_DATADIR")}out/tables/results.csv', 'w') as outfile:
-        writer = csv.DictWriter(outfile, fieldnames=colnames)
-        arukereso_prices = ArukeresoProcessor(columns_list=colnames, results_writer=writer)
-        arukereso_prices.produce_results()
+
+    path = f'{os.getenv("KBC_DATADIR")}out/tables/results.csv'
+
+    pipeline = queue.Queue(maxsize=1000)
+    event = threading.Event()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        executor.submit(producer, pipeline, colnames)
+        executor.submit(writer, pipeline, colnames, event, path)
