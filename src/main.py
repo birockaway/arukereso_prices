@@ -181,7 +181,7 @@ class ArukeresoProcessor:
         self.download_new_files()
         if not self.files_to_process:
             logging.info('No new files to process. Exiting.')
-            task_queue.put('DONE')
+            self.last_timestamp = self.previous_timestamp
         else:
             logging.info(f'Downloaded {len(self.files_to_process)} files.')
             for file in self.files_to_process:
@@ -191,8 +191,8 @@ class ArukeresoProcessor:
                         task_queue.put(result_dicts)
                 except Exception as e:
                     logging.error(f'Failed to process file: {file}. Exception {e}.')
-            self.write_new_last_timestamp()
-            task_queue.put('DONE')
+        self.write_new_last_timestamp()
+        task_queue.put('DONE')
 
 
 def producer(task_queue, columns_list):
