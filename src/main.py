@@ -140,7 +140,7 @@ class ArukeresoProcessor:
             if mapping == self.mall_fields[0]:
                 shop_data['ESHOP'] = 'mall.hu'
                 shop_data['AVAILABILITY'] = ''
-            if shop_data['ESHOP'] != '' and shop_data['ESHOP'] not in processed_eshops:
+            if shop_data['ESHOP'] != '' and shop_data['PRICE'] != '' and shop_data['ESHOP'] not in processed_eshops:
                 if 'Highlighted' in list(mapping.keys())[0]:
                     shop_data['HIGHLIGHTED_POSITION'] = re.findall(
                         r'\d+',
