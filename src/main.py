@@ -201,18 +201,16 @@ def producer(task_queue, columns_list):
 
 
 def writer(task_queue, columns_list, threading_event, filepath):
-    while not threading_event.is_set():
-        with open(filepath, 'w+') as outfile:
-            results_writer = csv.DictWriter(outfile, fieldnames=columns_list, extrasaction='ignore')
-            results_writer.writeheader()
-            while True:
-                chunk = task_queue.get()
-                if chunk == 'DONE':
-                    logging.info('DONE received. Exiting.')
-                    threading_event.set()
-                    break
-                else:
-                    results_writer.writerows(chunk)
+    with open(filepath, 'w+') as outfile:
+        results_writer = csv.DictWriter(outfile, fieldnames=columns_list, extrasaction='ignore')
+        results_writer.writeheader()
+        while not threading_event.is_set():
+            chunk = task_queue.get()
+            if chunk == 'DONE':
+                logging.info('DONE received. Exiting.')
+                threading_event.set()
+            else:
+                results_writer.writerows(chunk)
 
 
 if __name__ == '__main__':
