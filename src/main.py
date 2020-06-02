@@ -36,7 +36,7 @@ def sftp_connection(server_address, port_number, username, password_con, rsa, pa
 
 
 class ArukeresoProcessor:
-    def __init__(self, columns_list):
+    def __init__(self):
         self.datadir = os.getenv('KBC_DATADIR', '/data/')
         cfg = docker.Config(self.datadir)
         parameters = cfg.get_parameters()
@@ -54,7 +54,6 @@ class ArukeresoProcessor:
         self.files_to_process = []
         self.last_timestamp = 0
         self.previous_timestamp = 0
-        self.columns_list = columns_list
         (self.common_fields, self.highlighted_fields,
          self.cheapest_fields, self.mall_fields,
          self.constant_fields, self.observed_fields) = None, None, None, None, None, None
@@ -149,9 +148,7 @@ class ArukeresoProcessor:
                     'STOCK'] = 1 if shop_data['AVAILABILITY'] == 'instock' else 0
                 shop_data['TS'] = kwargs['file_timestamp']
                 shop_data['SOURCE_ID'] = kwargs['filename']
-                shop_result = {k: v
-                               for k, v in {**self.constant_fields, **shop_data}.items()
-                               if k in self.columns_list}
+                shop_result = {**self.constant_fields, **shop_data}
                 processed_eshops.append(shop_result['ESHOP'])
                 results.append(shop_result)
         return results
@@ -195,8 +192,8 @@ class ArukeresoProcessor:
         task_queue.put('DONE')
 
 
-def producer(task_queue, columns_list):
-    arukereso_prices = ArukeresoProcessor(columns_list=columns_list)
+def producer(task_queue):
+    arukereso_prices = ArukeresoProcessor()
     arukereso_prices.produce_results(task_queue=task_queue)
 
 
