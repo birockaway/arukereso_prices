@@ -243,5 +243,5 @@ if __name__ == '__main__':
     pipeline = queue.Queue(maxsize=1000)
     event = threading.Event()
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        executor.submit(producer, pipeline, colnames)
+        executor.submit(producer, pipeline)
         executor.submit(writer, pipeline, colnames, event, path)
