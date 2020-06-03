@@ -1,2 +1,2 @@
 paramiko==2.7.1
-logstash_formatter==0.5.17
+logging-gelf==0.0.26

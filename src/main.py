@@ -9,7 +9,8 @@ import threading
 import concurrent.futures
 
 import paramiko
-from logstash_formatter import LogstashFormatterV1
+import logging_gelf.handlers
+import logging_gelf.formatters
 from keboola import docker
 
 
@@ -210,37 +211,46 @@ def writer(task_queue, columns_list, threading_event, filepath):
                 results_writer.writerows(chunk)
 
 
-if __name__ == '__main__':
-    logger = logging.getLogger()
-    handler = logging.StreamHandler()
-    formatter = LogstashFormatterV1()
+if __name__ == "__main__":
 
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(level="DEBUG")
-    colnames = ['AVAILABILITY',
-                'COUNTRY',
-                'CSE_ID',
-                'CSE_URL',
-                'DISTRCHAN',
-                'ESHOP',
-                'FREQ',
-                'HIGHLIGHTED_POSITION',
-                'MATERIAL',
-                'POSITION',
-                'PRICE',
-                'RATING',
-                'REVIEW_COUNT',
-                'SOURCE',
-                'SOURCE_ID',
-                'STOCK',
-                'TOP',
-                'TS',
-                'URL', ]
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger()
+    try:
+        logging_gelf_handler = logging_gelf.handlers.GELFTCPSocketHandler(host=os.getenv('KBC_LOGGER_ADDR'),
+                                                                          port=int(os.getenv('KBC_LOGGER_PORT')))
+        # remove stdout logging when running inside keboola
+        logger.removeHandler(logger.handlers[0])
+    except TypeError:
+        logging_gelf_handler = logging.StreamHandler()
+
+    logging_gelf_handler.setFormatter(logging_gelf.formatters.GELFFormatter(null_character=True))
+    logger.addHandler(logging_gelf_handler)
+
+    colnames = [
+        "AVAILABILITY",
+        "COUNTRY",
+        "CSE_ID",
+        "CSE_URL",
+        "DISTRCHAN",
+        "ESHOP",
+        "FREQ",
+        "HIGHLIGHTED_POSITION",
+        "MATERIAL",
+        "POSITION",
+        "PRICE",
+        "RATING",
+        "REVIEW_COUNT",
+        "SOURCE",
+        "SOURCE_ID",
+        "STOCK",
+        "TOP",
+        "TS",
+        "URL",
+    ]
 
     path = f'{os.getenv("KBC_DATADIR")}out/tables/results.csv'
 
-    pipeline = queue.Queue(maxsize=1000)
+    pipeline = queue.Queue(maxsize=-1)
     event = threading.Event()
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         executor.submit(producer, pipeline)
