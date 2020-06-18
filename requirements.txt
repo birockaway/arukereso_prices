@@ -1,2 +1,3 @@
 paramiko==2.7.1
 logging-gelf==0.0.26
+git+https://github.com/birockaway/extractors_writer.git@master#egg=extractors_writer

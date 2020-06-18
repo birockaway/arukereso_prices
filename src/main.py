@@ -12,6 +12,7 @@ import paramiko
 import logging_gelf.handlers
 import logging_gelf.formatters
 from keboola import docker
+from extractors_writer import Writer
 
 
 @contextmanager
@@ -37,7 +38,8 @@ def sftp_connection(server_address, port_number, username, password_con, rsa, pa
 
 
 class ArukeresoProcessor:
-    def __init__(self):
+    def __init__(self, task_queue):
+        self.task_queue = task_queue
         self.datadir = os.getenv('KBC_DATADIR', '/data/')
         cfg = docker.Config(self.datadir)
         parameters = cfg.get_parameters()
@@ -58,6 +60,12 @@ class ArukeresoProcessor:
         (self.common_fields, self.highlighted_fields,
          self.cheapest_fields, self.mall_fields,
          self.constant_fields, self.observed_fields) = None, None, None, None, None, None
+
+    def produce(self):
+        try:
+            self.produce_results()
+        finally:
+            self.task_queue.put('DONE')
 
     def define_field_mappings(self):
         self.common_fields = {
@@ -124,6 +132,7 @@ class ArukeresoProcessor:
                     destpath = f'{destroot}/{file.filename}'
                     self.files_to_process.append(destpath)
                     sftp.get(sourcepath, destpath)
+
         self.last_timestamp = last_timestamp
 
     def process_line(self, line, **kwargs):
@@ -173,7 +182,7 @@ class ArukeresoProcessor:
             dict_writer.writeheader()
             dict_writer.writerow({'max_timestamp_this_run': self.last_timestamp})
 
-    def produce_results(self, task_queue):
+    def produce_results(self):
         self.define_field_mappings()
         self.get_previous_last_timestamp()
         self.download_new_files()
@@ -186,29 +195,10 @@ class ArukeresoProcessor:
                 logging.info(f'Processing file: {file}')
                 try:
                     for result_dicts in self.get_file_dicts(file):
-                        task_queue.put(result_dicts)
+                        self.task_queue.put(result_dicts)
                 except Exception as e:
                     logging.error(f'Failed to process file: {file}. Exception {e}.')
         self.write_new_last_timestamp()
-        task_queue.put('DONE')
-
-
-def producer(task_queue):
-    arukereso_prices = ArukeresoProcessor()
-    arukereso_prices.produce_results(task_queue=task_queue)
-
-
-def writer(task_queue, columns_list, threading_event, filepath):
-    with open(filepath, 'w+') as outfile:
-        results_writer = csv.DictWriter(outfile, fieldnames=columns_list, extrasaction='ignore')
-        results_writer.writeheader()
-        while not threading_event.is_set():
-            chunk = task_queue.get()
-            if chunk == 'DONE':
-                logging.info('DONE received. Exiting.')
-                threading_event.set()
-            else:
-                results_writer.writerows(chunk)
 
 
 if __name__ == "__main__":
@@ -252,6 +242,8 @@ if __name__ == "__main__":
 
     pipeline = queue.Queue(maxsize=1000)
     event = threading.Event()
+    producer = ArukeresoProcessor(task_queue=pipeline)
+    writer = Writer(pipeline, colnames, path)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        executor.submit(producer, pipeline)
-        executor.submit(writer, pipeline, colnames, event, path)
+        executor.submit(producer.produce)
+        executor.submit(writer)
